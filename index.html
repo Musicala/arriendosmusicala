@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arriendos Musicala</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div class="hero__content">
+        <div class="brand">
+          <div class="brand__mark">
+            <img src="./logo.png" alt="Musicala" />
+          </div>
+          <div>
+            <p class="eyebrow">Musicala · Decisiones de sede</p>
+            <h1>Seguimiento de opciones de arriendo</h1>
+            <p class="hero__text">
+              Registren opciones, comparen costos, califiquen por separado y encuentren la sede que no parezca elegida por una ruleta emocional.
+            </p>
+          </div>
+        </div>
+
+        <div class="auth-card">
+          <div id="userBox" class="user-box">
+            <span class="status-dot"></span>
+            <span id="authStatus">Sin iniciar sesión</span>
+          </div>
+          <button id="loginBtn" class="btn btn--primary">Entrar con Google</button>
+          <button id="logoutBtn" class="btn btn--ghost hidden">Salir</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="privateApp" class="private-app hidden">
+      <section class="dashboard">
+        <article class="metric-card">
+          <span>Opciones activas</span>
+          <strong id="metricActive">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Favoritas</span>
+          <strong id="metricFavorites">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Mejor puntaje</span>
+          <strong id="metricBest">—</strong>
+        </article>
+        <article class="metric-card">
+          <span>Promedio canon</span>
+          <strong id="metricAvgRent">—</strong>
+        </article>
+      </section>
+
+      <section class="toolbar">
+        <div class="toolbar__main">
+          <label class="field field--search">
+            <span>Buscar</span>
+            <input id="searchInput" type="search" placeholder="Nombre, zona, dirección, etiqueta..." />
+          </label>
+
+          <label class="field">
+            <span>Estado</span>
+            <select id="statusFilter"></select>
+          </label>
+
+          <label class="field">
+            <span>Presupuesto máximo</span>
+            <input id="budgetFilter" type="number" min="0" step="50000" placeholder="Ej. 6000000" />
+          </label>
+
+          <label class="field">
+            <span>Puntaje mínimo</span>
+            <input id="scoreFilter" type="number" min="0" max="100" step="1" placeholder="Ej. 75" />
+          </label>
+
+          <label class="field">
+            <span>Ordenar</span>
+            <select id="sortFilter">
+              <option value="score_desc">Mejor puntaje</option>
+              <option value="rent_asc">Menor costo</option>
+              <option value="area_desc">Mayor área</option>
+              <option value="updated_desc">Actualizado reciente</option>
+              <option value="created_desc">Creado reciente</option>
+            </select>
+          </label>
+        </div>
+
+        <button id="newOptionBtn" class="btn btn--accent">+ Agregar opción</button>
+      </section>
+
+      <section id="emptyState" class="empty-state hidden">
+        <h2>Aún no hay opciones</h2>
+        <p>Agreguen la primera opción de arriendo y dejen de decidir con 47 pantallazos perdidos en WhatsApp.</p>
+      </section>
+
+      <section id="optionsGrid" class="options-grid"></section>
+    </main>
+
+    <section id="blockedState" class="blocked-state hidden">
+      <h2>Acceso restringido</h2>
+      <p>
+        Esta app contiene información sensible de búsqueda de sede. Solo Alek y Cata pueden entrar.
+      </p>
+    </section>
+  </div>
+
+  <dialog id="optionDialog" class="dialog">
+    <form id="optionForm" class="dialog__content">
+      <div class="dialog__header">
+        <div>
+          <p class="eyebrow">Opción de arriendo</p>
+          <h2 id="optionDialogTitle">Agregar opción</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-dialog="optionDialog">×</button>
+      </div>
+
+      <input id="optionId" type="hidden" />
+
+      <div class="form-grid">
+        <label class="field span-2">
+          <span>Nombre corto</span>
+          <input id="titleInput" required placeholder="Ej. Casa amplia cerca a Av. Boyacá" />
+        </label>
+
+        <label class="field">
+          <span>Estado</span>
+          <select id="statusInput"></select>
+        </label>
+
+        <label class="field">
+          <span>Zona / barrio</span>
+          <input id="zoneInput" placeholder="Ej. Los Andes, Galerías, Cedritos..." />
+        </label>
+
+        <label class="field span-2">
+          <span>Dirección o referencia</span>
+          <input id="addressInput" placeholder="Dirección, punto de referencia o zona aproximada" />
+        </label>
+
+        <label class="field">
+          <span>Canon mensual</span>
+          <input id="rentInput" type="number" min="0" step="50000" placeholder="Ej. 4500000" />
+        </label>
+
+        <label class="field">
+          <span>Administración</span>
+          <input id="adminInput" type="number" min="0" step="50000" placeholder="Ej. 600000" />
+        </label>
+
+        <label class="field">
+          <span>Servicios estimados</span>
+          <input id="servicesInput" type="number" min="0" step="50000" placeholder="Ej. 700000" />
+        </label>
+
+        <label class="field">
+          <span>Adecuaciones estimadas</span>
+          <input id="setupInput" type="number" min="0" step="100000" placeholder="Ej. 8000000" />
+        </label>
+
+        <label class="field">
+          <span>Área aproximada m²</span>
+          <input id="areaInput" type="number" min="0" step="1" placeholder="Ej. 240" />
+        </label>
+
+        <label class="field">
+          <span>Salones/espacios posibles</span>
+          <input id="roomsInput" type="number" min="0" step="1" placeholder="Ej. 8" />
+        </label>
+
+        <label class="field">
+          <span>Fecha de visita</span>
+          <input id="visitDateInput" type="date" />
+        </label>
+
+        <label class="field">
+          <span>Próxima acción</span>
+          <input id="nextActionDateInput" type="date" />
+        </label>
+
+        <label class="field span-2">
+          <span>Texto de próxima acción</span>
+          <input id="nextActionInput" placeholder="Ej. Pedir video, confirmar uso comercial, negociar canon..." />
+        </label>
+
+        <label class="field">
+          <span>Contacto</span>
+          <input id="contactNameInput" placeholder="Nombre inmobiliaria/persona" />
+        </label>
+
+        <label class="field">
+          <span>Teléfono</span>
+          <input id="contactPhoneInput" placeholder="WhatsApp o teléfono" />
+        </label>
+
+        <label class="field span-2">
+          <span>Link de publicación</span>
+          <input id="listingUrlInput" type="url" placeholder="https://..." />
+        </label>
+
+        <label class="field span-2">
+          <span>Etiquetas</span>
+          <input id="tagsInput" placeholder="grande, visible, costosa, buena zona..." />
+        </label>
+
+        <label class="field span-2">
+          <span>Riesgos detectados</span>
+          <input id="risksInput" placeholder="ruido, humedad, vecinos, permisos, remodelación..." />
+        </label>
+
+        <label class="field span-2">
+          <span>Pros</span>
+          <textarea id="prosInput" rows="3" placeholder="Lo bueno de esta opción"></textarea>
+        </label>
+
+        <label class="field span-2">
+          <span>Contras</span>
+          <textarea id="consInput" rows="3" placeholder="Lo que puede complicar la vida, porque siempre hay algo"></textarea>
+        </label>
+
+        <label class="field span-2">
+          <span>Notas generales</span>
+          <textarea id="notesInput" rows="4" placeholder="Observaciones, negociación, dudas, condiciones..."></textarea>
+        </label>
+
+        <label class="switch span-2">
+          <input id="favoriteInput" type="checkbox" />
+          <span>Marcar como favorita</span>
+        </label>
+      </div>
+
+      <div class="dialog__actions">
+        <button type="button" class="btn btn--ghost" data-close-dialog="optionDialog">Cancelar</button>
+        <button type="submit" class="btn btn--primary">Guardar opción</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ratingDialog" class="dialog">
+    <form id="ratingForm" class="dialog__content dialog__content--narrow">
+      <div class="dialog__header">
+        <div>
+          <p class="eyebrow">Calificación personal</p>
+          <h2 id="ratingDialogTitle">Calificar opción</h2>
+          <p id="ratingUserLabel" class="muted"></p>
+        </div>
+        <button type="button" class="icon-btn" data-close-dialog="ratingDialog">×</button>
+      </div>
+
+      <input id="ratingOptionId" type="hidden" />
+
+      <div id="ratingCriteria" class="rating-criteria"></div>
+
+      <label class="field">
+        <span>Comentario personal</span>
+        <textarea id="ratingNotesInput" rows="4" placeholder="Qué te gusta, qué te preocupa, qué preguntarías..."></textarea>
+      </label>
+
+      <div class="dialog__actions">
+        <button type="button" class="btn btn--ghost" data-close-dialog="ratingDialog">Cancelar</button>
+        <button type="submit" class="btn btn--primary">Guardar calificación</button>
+      </div>
+    </form>
+  </dialog>
+
+  <template id="optionCardTemplate">
+    <article class="option-card">
+      <div class="option-card__top">
+        <div>
+          <div class="status-row">
+            <span class="pill pill--status"></span>
+            <span class="pill pill--score"></span>
+          </div>
+          <h2 class="option-title"></h2>
+          <p class="option-location"></p>
+        </div>
+        <button class="favorite-btn" title="Marcar favorita">♡</button>
+      </div>
+
+      <div class="cost-row">
+        <div>
+          <span>Mensual estimado</span>
+          <strong class="total-cost"></strong>
+        </div>
+        <div>
+          <span>Área</span>
+          <strong class="area-value"></strong>
+        </div>
+        <div>
+          <span>Salones</span>
+          <strong class="rooms-value"></strong>
+        </div>
+      </div>
+
+      <div class="ratings-summary"></div>
+
+      <div class="tags-list"></div>
+
+      <details class="details-block">
+        <summary>Ver análisis y seguimiento</summary>
+        <div class="details-grid">
+          <div>
+            <h3>Pros</h3>
+            <p class="pros-text"></p>
+          </div>
+          <div>
+            <h3>Contras</h3>
+            <p class="cons-text"></p>
+          </div>
+          <div>
+            <h3>Riesgos</h3>
+            <p class="risks-text"></p>
+          </div>
+          <div>
+            <h3>Próxima acción</h3>
+            <p class="next-action-text"></p>
+          </div>
+          <div class="span-2">
+            <h3>Notas</h3>
+            <p class="notes-text"></p>
+          </div>
+        </div>
+      </details>
+
+      <div class="option-actions">
+        <a class="btn btn--tiny maps-link" target="_blank" rel="noreferrer">Mapa</a>
+        <a class="btn btn--tiny listing-link" target="_blank" rel="noreferrer">Publicación</a>
+        <button class="btn btn--tiny rate-btn">Calificar</button>
+        <button class="btn btn--tiny edit-btn">Editar</button>
+        <button class="btn btn--tiny btn--danger delete-btn">Eliminar</button>
+      </div>
+    </article>
+  </template>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
