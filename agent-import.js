@@ -326,6 +326,11 @@ function renderResult(result) {
   resultBox.classList.remove("hidden");
 }
 
+function setResult(message, hide = false) {
+  resultBox.textContent = message;
+  resultBox.classList.toggle("hidden", hide || !message);
+}
+
 function renderError(error) {
   const detail = error.technical || {};
   failedBatch = failedBatch || {};
