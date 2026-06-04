@@ -185,6 +185,52 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.agent-import {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 12px 18px 56px;
+}
+
+.agent-import__panel,
+.agent-import__result {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.agent-import__panel {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.agent-import__panel textarea {
+  min-height: 340px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.agent-import__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.agent-import__preview {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.agent-import__result {
+  margin-top: 16px;
+  padding: 18px 20px;
+  font-weight: 800;
+}
+
 .dashboard {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

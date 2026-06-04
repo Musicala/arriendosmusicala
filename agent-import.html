@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Importacion por agente | Arriendos Musicala</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div class="hero__content">
+        <div class="brand">
+          <div class="brand__mark">
+            <img src="./logo.png" alt="Musicala" />
+          </div>
+          <div>
+            <p class="eyebrow">Musicala - Modo Agente</p>
+            <h1>Importacion por agente</h1>
+            <p class="hero__text">
+              Carga opciones encontradas por agente usando una clave temporal. La clave se envia solo al endpoint seguro y no se guarda en este navegador.
+            </p>
+          </div>
+        </div>
+
+        <div class="auth-card">
+          <a class="btn btn--ghost" href="./index.html">Volver al tablero</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="agent-import">
+      <form id="agentImportForm" class="agent-import__panel">
+        <label class="field">
+          <span>URL de Cloud Function</span>
+          <input id="functionUrlInput" type="url" placeholder="https://us-central1-arriendos-musicala.cloudfunctions.net/agentImportRentalOptions" />
+        </label>
+
+        <label class="field">
+          <span>Clave temporal del agente</span>
+          <input id="agentKeyInput" type="password" autocomplete="off" placeholder="Pegar clave temporal" />
+        </label>
+
+        <label class="field">
+          <span>JSON de opciones</span>
+          <textarea id="jsonInput" rows="18" spellcheck="false" placeholder='{"items":[{"title":"Casa amplia cerca a Galerias","zone":"Galerias","rent":6500000}]}'></textarea>
+        </label>
+
+        <div class="agent-import__actions">
+          <div id="previewBox" class="agent-import__preview">Sin JSON para importar.</div>
+          <button class="btn btn--primary" type="submit">Importar opciones</button>
+        </div>
+      </form>
+
+      <section id="resultBox" class="agent-import__result hidden" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <script type="module" src="./agent-import.js"></script>
+</body>
+</html>
