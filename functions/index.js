@@ -8,13 +8,14 @@ const db = admin.firestore();
 const AGENT_IMPORT_SECRET = defineSecret("AGENT_IMPORT_SECRET");
 
 const ALLOWED_ORIGINS = [
+  "https://musicala.github.io",
+  "https://musicala.github.io/arriendosmusicala",
+  "https://musicala.github.io/arriendosmusicala/",
   "http://localhost:3000",
-  "http://localhost:5000",
   "http://localhost:5173",
+  "http://127.0.0.1:5500",
   "http://127.0.0.1:3000",
-  "http://127.0.0.1:5000",
   "http://127.0.0.1:5173"
-  // "https://TU_USUARIO.github.io"
 ];
 
 const MAX_ITEMS = 25;
@@ -49,7 +50,9 @@ const NUMBER_FIELDS = [
   "servicesEstimate",
   "setupEstimate",
   "area",
-  "rooms"
+  "rooms",
+  "bathrooms",
+  "parking"
 ];
 
 exports.agentImportRentalOptions = onRequest(
@@ -67,17 +70,18 @@ exports.agentImportRentalOptions = onRequest(
     }
 
     if (req.method !== "POST") {
-      res.status(405).json({ ok: false, error: "Metodo no permitido. Usa POST." });
+      res.status(405).json(makeError("Metodo no permitido. Usa POST.", "METHOD_NOT_ALLOWED"));
       return;
     }
 
     if (getBodySize(req) > MAX_BODY_BYTES) {
-      res.status(413).json({ ok: false, error: "Payload demasiado grande." });
+      res.status(413).json(makeError("Payload demasiado grande.", "VALIDATION_ERROR"));
       return;
     }
 
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const providedKey = getAgentKey(req, body);
+    const dryRun = body.dryRun === true;
 
     if (!providedKey || providedKey !== AGENT_IMPORT_SECRET.value()) {
       await writeAuditLog(req, {
@@ -87,7 +91,7 @@ exports.agentImportRentalOptions = onRequest(
         rejectedCount: countReceived(body),
         rejectedItems: [{ index: null, reason: "Clave invalida o ausente." }]
       });
-      res.status(401).json({ ok: false, error: "Clave de agente invalida o ausente." });
+      res.status(401).json(makeError("Clave de agente invalida o ausente.", "AUTH_FAILED"));
       return;
     }
 
@@ -101,7 +105,7 @@ exports.agentImportRentalOptions = onRequest(
         rejectedCount: 0,
         rejectedItems: [{ index: null, reason: "No se recibieron items." }]
       });
-      res.status(400).json({ ok: false, error: "Envia item o items con al menos una opcion." });
+      res.status(400).json(makeError("Envia item o items con al menos una opcion.", "VALIDATION_ERROR"));
       return;
     }
 
@@ -113,7 +117,7 @@ exports.agentImportRentalOptions = onRequest(
         rejectedCount: rawItems.length,
         rejectedItems: [{ index: null, reason: `Maximo ${MAX_ITEMS} items por request.` }]
       });
-      res.status(400).json({ ok: false, error: `Maximo ${MAX_ITEMS} items por request.` });
+      res.status(400).json(makeError(`Maximo ${MAX_ITEMS} items por request.`, "VALIDATION_ERROR"));
       return;
     }
 
@@ -133,6 +137,17 @@ exports.agentImportRentalOptions = onRequest(
 
       try {
         const existingId = await findExistingOption(normalized);
+        if (dryRun) {
+          if (existingId) {
+            updatedCount += 1;
+            results.push({ index, status: "would_update", id: existingId });
+          } else {
+            createdCount += 1;
+            results.push({ index, status: "would_create" });
+          }
+          continue;
+        }
+
         const now = admin.firestore.FieldValue.serverTimestamp();
         const payload = {
           ...normalized,
@@ -169,15 +184,21 @@ exports.agentImportRentalOptions = onRequest(
       createdCount,
       updatedCount,
       rejectedCount: rejectedItems.length,
-      rejectedItems
+      rejectedItems,
+      dryRun
     });
 
     res.status(200).json({
       ok: true,
+      batchId: db.collection("agentImportLogs").doc().id,
       totalReceived: rawItems.length,
       createdCount,
       updatedCount,
       rejectedCount: rejectedItems.length,
+      validCount: rawItems.length - rejectedItems.length,
+      warnings: buildWarnings(rawItems.map(normalizeRentalOption)),
+      errors: [],
+      normalizedPreview: dryRun ? rawItems.map(normalizeRentalOption).slice(0, 5) : [],
       results
     });
   }
@@ -190,7 +211,7 @@ function applyCors(req, res) {
     res.set("Vary", "Origin");
   }
   res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Agent-Key");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.set("Access-Control-Max-Age", "3600");
 }
 
@@ -215,6 +236,7 @@ function getAgentKey(req, body) {
 }
 
 function normalizeIncomingItems(body) {
+  if (Array.isArray(body)) return body;
   if (Array.isArray(body.items)) return body.items;
   if (body.item && typeof body.item === "object") return [body.item];
   return [];
@@ -231,6 +253,8 @@ function normalizeRentalOption(input) {
   STRING_FIELDS.forEach((field) => {
     output[field] = normalizeString(item[field]);
   });
+
+  output.listingUrl = normalizeString(item.listingUrl || item.url || item.sourceUrl);
 
   NUMBER_FIELDS.forEach((field) => {
     output[field] = normalizeNumber(item[field]);
@@ -338,7 +362,8 @@ async function writeAuditLog(req, summary) {
     userAgent: normalizeString(req.get("user-agent")),
     origin: normalizeString(req.get("origin")),
     ip: normalizeString(req.ip || req.get("x-forwarded-for")).slice(0, 120),
-    source: "agent"
+    source: "agent",
+    dryRun: Boolean(summary.dryRun)
   });
 }
 
@@ -348,4 +373,22 @@ function sanitizeRejectedItems(items) {
     title: normalizeString(item.title).slice(0, 160),
     reason: normalizeString(item.reason).slice(0, 220)
   }));
+}
+
+function buildWarnings(items) {
+  const warnings = [];
+  const missingUrl = items.filter((item) => !item.listingUrl).length;
+  const missingRent = items.filter((item) => !item.rent).length;
+  if (missingUrl) warnings.push(`${missingUrl} opciones no tienen URL.`);
+  if (missingRent) warnings.push(`${missingRent} opciones no tienen precio.`);
+  return warnings;
+}
+
+function makeError(error, code, details = "") {
+  return {
+    ok: false,
+    error,
+    details,
+    code
+  };
 }

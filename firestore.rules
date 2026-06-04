@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAlek() {
+      return signedIn() && request.auth.token.email == "alekcaballeromusic@gmail.com";
+    }
+
+    function isCata() {
+      return signedIn() && request.auth.token.email == "catalina.medina.leal@gmail.com";
+    }
+
+    function isTeam() {
+      return isAlek() || isCata();
+    }
+
+    match /rentalOptions/{optionId} {
+      allow read, create, update, delete: if isTeam();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
