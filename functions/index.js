@@ -1,11 +1,10 @@
 const { onRequest } = require("firebase-functions/v2/https");
-const { defineSecret } = require("firebase-functions/params");
+const crypto = require("crypto");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
 
 const db = admin.firestore();
-const AGENT_IMPORT_SECRET = defineSecret("AGENT_IMPORT_SECRET");
 
 const ALLOWED_ORIGINS = [
   "https://musicala.github.io",
@@ -58,7 +57,6 @@ const NUMBER_FIELDS = [
 exports.agentImportRentalOptions = onRequest(
   {
     region: "us-central1",
-    secrets: [AGENT_IMPORT_SECRET],
     maxInstances: 10
   },
   async (req, res) => {
@@ -83,16 +81,25 @@ exports.agentImportRentalOptions = onRequest(
     const providedKey = getAgentKey(req, body);
     const dryRun = body.dryRun === true;
 
-    if (!providedKey || providedKey !== AGENT_IMPORT_SECRET.value()) {
+    const tokenDoc = await validateAgentKey(providedKey);
+    if (!tokenDoc) {
       await writeAuditLog(req, {
         totalReceived: countReceived(body),
         createdCount: 0,
         updatedCount: 0,
         rejectedCount: countReceived(body),
-        rejectedItems: [{ index: null, reason: "Clave invalida o ausente." }]
+        rejectedItems: [{ index: null, reason: "Clave invalida, vencida o revocada." }]
       });
-      res.status(401).json(makeError("Clave de agente invalida o ausente.", "AUTH_FAILED"));
+      res.status(401).json(makeError("Clave de agente invalida, vencida o revocada.", "AUTH_FAILED"));
       return;
+    }
+
+    // Registra uso de la clave (sin guardar la clave en claro).
+    if (!dryRun) {
+      await tokenDoc.ref.update({
+        lastUsedAt: admin.firestore.FieldValue.serverTimestamp(),
+        useCount: admin.firestore.FieldValue.increment(1)
+      }).catch(() => {});
     }
 
     const rawItems = normalizeIncomingItems(body);
@@ -235,6 +242,36 @@ function getAgentKey(req, body) {
   return (req.get("x-agent-key") || body.agentKey || "").toString().trim();
 }
 
+function sha256hex(value) {
+  return crypto.createHash("sha256").update(String(value), "utf8").digest("hex");
+}
+
+async function validateAgentKey(providedKey) {
+  const key = (providedKey || "").toString().trim();
+  if (!key) return null;
+
+  const tokenHash = sha256hex(key);
+  const snapshot = await db
+    .collection("agentTokens")
+    .where("tokenHash", "==", tokenHash)
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) return null;
+
+  const docSnap = snapshot.docs[0];
+  const data = docSnap.data() || {};
+
+  if (data.revoked === true) return null;
+
+  const expiresAt = data.expiresAt;
+  if (expiresAt && typeof expiresAt.toMillis === "function" && expiresAt.toMillis() < Date.now()) {
+    return null;
+  }
+
+  return docSnap;
+}
+
 function normalizeIncomingItems(body) {
   if (Array.isArray(body)) return body;
   if (Array.isArray(body.items)) return body.items;
@@ -256,7 +293,11 @@ function normalizeRentalOption(input) {
 
   output.listingUrl = normalizeString(item.listingUrl || item.url || item.sourceUrl);
 
+  output.rooms = normalizeNumber(item.rooms || item.spaces || item.salones || item.roomsCount);
+  output.bathrooms = normalizeNumber(item.bathrooms || item.baths || item.banos || item.baños || item.bathroomsCount || item.numberOfBathrooms);
+
   NUMBER_FIELDS.forEach((field) => {
+    if (field === "rooms" || field === "bathrooms") return;
     output[field] = normalizeNumber(item[field]);
   });
 
@@ -379,8 +420,10 @@ function buildWarnings(items) {
   const warnings = [];
   const missingUrl = items.filter((item) => !item.listingUrl).length;
   const missingRent = items.filter((item) => !item.rent).length;
+  const missingBathrooms = items.filter((item) => !item.bathrooms).length;
   if (missingUrl) warnings.push(`${missingUrl} opciones no tienen URL.`);
   if (missingRent) warnings.push(`${missingRent} opciones no tienen precio.`);
+  if (missingBathrooms) warnings.push(`${missingBathrooms} opciones no tienen cantidad de baños.`);
   return warnings;
 }
 

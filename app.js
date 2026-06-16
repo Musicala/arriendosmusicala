@@ -14,10 +14,13 @@ import {
   updateDoc,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   query,
+  where,
   orderBy,
-  serverTimestamp
+  serverTimestamp,
+  Timestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const TEAM = {
@@ -30,6 +33,61 @@ const TEAM = {
     email: "catalina.medina.leal@gmail.com"
   }
 };
+
+// Modo Agente: endpoint de la Cloud Function y página de importación.
+const AGENT_CONFIG = {
+  functionUrl: "https://agentimportrentaloptions-icjdq4tq3a-uc.a.run.app",
+  importPageUrl: "https://musicala.github.io/arriendosmusicala/agent-import.html",
+  tokenDays: 7
+};
+
+// Plantilla del prompt. {{ENDPOINT}}, {{KEY}} e {{IMPORT_URL}} se rellenan al generar la clave.
+const AGENT_PROMPT_TEMPLATE = `ROL
+Eres un asistente de investigación inmobiliaria para "Musicala", una escuela de
+artes (música, danza, artes plásticas y teatro) que busca un local en arriendo
+en Bogotá. Buscas opciones reales de arriendo en internet y las entregas en JSON limpio.
+
+OBJETIVO DEL ESPACIO
+- Uso: escuela de artes con salones para música, danza, artes plásticas y teatro.
+- Necesita varios salones/espacios y baños.
+- Zonas preferidas: Pasadena, Pontevedra y Andes (ajustar si te indican otras).
+- Presupuesto de canon: hasta $7.000.000 COP/mes.
+- Verificar uso de suelo compatible con actividad educativa/cultural.
+
+DÓNDE BUSCAR
+Metrocuadrado, Fincaraíz, Ciencuadras, Mercado Libre Inmuebles, Properati e
+inmobiliarias. Solo anuncios reales y vigentes.
+
+REGLAS ESTRICTAS DE DATOS
+1. NUNCA inventes datos. Si un dato no aparece, déjalo vacío ("") o en 0. No aproximes.
+2. "listingUrl" debe ser el enlace real y directo al anuncio. Es obligatorio.
+3. Precios en números sin símbolos ni puntos de miles (6500000, no "$6.500.000").
+4. "agentConfidence": "alta" si el anuncio es claro, "media" si faltan datos, "baja" si es dudoso.
+5. En "agentSummary" resume en 1-2 frases por qué sirve o no para una escuela de artes.
+6. En "risks" marca riesgos reales (ej. "uso de suelo por verificar", "sin parqueadero").
+
+FORMATO DE SALIDA (entrega SOLO este JSON, sin texto extra):
+{
+  "items": [
+    {
+      "title": "", "zone": "", "address": "",
+      "rent": 0, "administration": 0, "area": 0,
+      "rooms": 0, "bathrooms": 0, "parking": 0,
+      "contactName": "", "contactPhone": "", "listingUrl": "",
+      "status": "nueva", "pros": "", "cons": "",
+      "risks": [], "tags": [], "agentSummary": "", "agentConfidence": "media"
+    }
+  ]
+}
+
+CÓMO ENTREGAR (con acceso a navegador):
+1. Ve a la página de importación: {{IMPORT_URL}}
+2. En "Endpoint" pega: {{ENDPOINT}}
+3. En "Clave temporal del agente" pega: {{KEY}}
+4. Pega el JSON completo en el área de texto.
+5. Marca "Solo validar, no guardar" y presiona Importar para revisar la vista previa.
+6. Si todo se ve bien, desmarca esa casilla e importa de verdad.
+7. No guardes la clave en ningún otro lugar. Esta clave caduca en {{DAYS}} días.`;
 
 const STATUS_LABELS = {
   nueva: "Nueva",
@@ -145,7 +203,15 @@ const els = {
   metricActive: document.querySelector("#metricActive"),
   metricFavorites: document.querySelector("#metricFavorites"),
   metricBest: document.querySelector("#metricBest"),
-  metricAvgRent: document.querySelector("#metricAvgRent")
+  metricAvgRent: document.querySelector("#metricAvgRent"),
+  agentModeBtn: document.querySelector("#agentModeBtn"),
+  agentDialog: document.querySelector("#agentDialog"),
+  agentTokenLabel: document.querySelector("#agentTokenLabel"),
+  generateTokenBtn: document.querySelector("#generateTokenBtn"),
+  newTokenBox: document.querySelector("#newTokenBox"),
+  agentPromptOutput: document.querySelector("#agentPromptOutput"),
+  copyPromptBtn: document.querySelector("#copyPromptBtn"),
+  tokenList: document.querySelector("#tokenList")
 };
 
 const optionInputs = {
@@ -160,6 +226,7 @@ const optionInputs = {
   setupEstimate: document.querySelector("#setupInput"),
   area: document.querySelector("#areaInput"),
   rooms: document.querySelector("#roomsInput"),
+  bathrooms: document.querySelector("#bathroomsInput"),
   visitDate: document.querySelector("#visitDateInput"),
   nextActionDate: document.querySelector("#nextActionDateInput"),
   nextAction: document.querySelector("#nextActionInput"),
@@ -216,6 +283,10 @@ function bindEvents() {
   });
 
   els.newOptionBtn.addEventListener("click", () => openOptionDialog());
+
+  els.agentModeBtn.addEventListener("click", openAgentDialog);
+  els.generateTokenBtn.addEventListener("click", handleGenerateToken);
+  els.copyPromptBtn.addEventListener("click", copyAgentPrompt);
 
   els.optionForm.addEventListener("submit", handleOptionSubmit);
   els.ratingForm.addEventListener("submit", handleRatingSubmit);
@@ -294,6 +365,7 @@ function renderAuth() {
     els.userBox.classList.remove("is-online");
     els.loginBtn.classList.remove("hidden");
     els.logoutBtn.classList.add("hidden");
+    els.agentModeBtn.classList.add("hidden");
     els.privateApp.classList.add("hidden");
     els.blockedState.classList.add("hidden");
     return;
@@ -305,10 +377,13 @@ function renderAuth() {
 
   if (!profile) {
     els.authStatus.textContent = `${user.email} · sin acceso`;
+    els.agentModeBtn.classList.add("hidden");
     els.privateApp.classList.add("hidden");
     els.blockedState.classList.remove("hidden");
     return;
   }
+
+  els.agentModeBtn.classList.remove("hidden");
 
   els.authStatus.textContent = `${profile.label} · ${user.email}`;
   els.privateApp.classList.remove("hidden");
@@ -389,6 +464,7 @@ function getVisibleOptions() {
       option.notes,
       option.pros,
       option.cons,
+      option.bathrooms ? `${option.bathrooms} baños` : "",
       ...(option.tags || []),
       ...(option.risks || [])
     ].join(" ").toLowerCase();
@@ -428,8 +504,9 @@ function renderOptionCard(option) {
   card.querySelector(".option-title").textContent = option.title || "Sin nombre";
   card.querySelector(".option-location").textContent = [option.zone, option.address].filter(Boolean).join(" · ") || "Sin ubicación";
   card.querySelector(".total-cost").textContent = totalCost ? formatCOP(totalCost) : "—";
-  card.querySelector(".area-value").textContent = option.area ? `${option.area} m²` : "—";
-  card.querySelector(".rooms-value").textContent = option.rooms || "—";
+  card.querySelector(".area-value").textContent = option.area ? `${formatNumber(option.area)} m²` : "—";
+  card.querySelector(".rooms-value").textContent = option.rooms ? formatCount(option.rooms, "salón", "salones") : "—";
+  card.querySelector(".bathrooms-value").textContent = option.bathrooms ? formatCount(option.bathrooms, "baño", "baños") : "—";
 
   const favoriteBtn = card.querySelector(".favorite-btn");
   favoriteBtn.textContent = option.favorite || option.status === "favorita" ? "♥" : "♡";
@@ -543,6 +620,7 @@ function openOptionDialog(option = null) {
   optionInputs.setupEstimate.value = option.setupEstimate || "";
   optionInputs.area.value = option.area || "";
   optionInputs.rooms.value = option.rooms || "";
+  optionInputs.bathrooms.value = option.bathrooms || "";
   optionInputs.visitDate.value = option.visitDate || "";
   optionInputs.nextActionDate.value = option.nextActionDate || "";
   optionInputs.nextAction.value = option.nextAction || "";
@@ -573,6 +651,7 @@ async function handleOptionSubmit(event) {
     setupEstimate: safeNumber(optionInputs.setupEstimate.value),
     area: safeNumber(optionInputs.area.value),
     rooms: safeNumber(optionInputs.rooms.value),
+    bathrooms: safeNumber(optionInputs.bathrooms.value),
     visitDate: optionInputs.visitDate.value || "",
     nextActionDate: optionInputs.nextActionDate.value || "",
     nextAction: clean(optionInputs.nextAction.value),
@@ -691,6 +770,146 @@ async function deleteOption(option) {
   }
 }
 
+// ---- Modo Agente: claves para IA ----
+
+function openAgentDialog() {
+  els.newTokenBox.classList.add("hidden");
+  els.newTokenBox.innerHTML = "";
+  els.agentPromptOutput.value = "";
+  els.agentTokenLabel.value = "";
+  els.agentDialog.showModal();
+  loadTokens();
+}
+
+async function handleGenerateToken() {
+  if (!state.profile) return;
+
+  els.generateTokenBtn.disabled = true;
+  els.generateTokenBtn.textContent = "Generando…";
+
+  try {
+    const key = generateRandomKey();
+    const tokenHash = await sha256hex(key);
+    const expiresAt = Timestamp.fromMillis(Date.now() + AGENT_CONFIG.tokenDays * 24 * 60 * 60 * 1000);
+
+    await addDoc(collection(db, "agentTokens"), {
+      tokenHash,
+      tokenPreview: `${key.slice(0, 4)}…${key.slice(-4)}`,
+      label: clean(els.agentTokenLabel.value) || "Sin nombre",
+      createdBy: state.profile.email,
+      createdAt: serverTimestamp(),
+      expiresAt,
+      revoked: false,
+      lastUsedAt: null,
+      useCount: 0
+    });
+
+    const prompt = buildAgentPrompt(key);
+    els.agentPromptOutput.value = prompt;
+
+    els.newTokenBox.classList.remove("hidden");
+    els.newTokenBox.innerHTML = `
+      <strong>Clave creada (cópiala ahora, no se vuelve a mostrar):</strong>
+      <code class="token-code">${escapeHtml(key)}</code>
+      <small>Válida hasta ${expiresAt.toDate().toLocaleDateString("es-CO")}. El prompt de abajo ya la incluye.</small>
+    `;
+
+    await copyAgentPrompt();
+    loadTokens();
+  } catch (error) {
+    console.error("Error generando clave:", error);
+    alert("No se pudo generar la clave. Revisa permisos de Firebase.");
+  } finally {
+    els.generateTokenBtn.disabled = false;
+    els.generateTokenBtn.textContent = "Generar clave para IA";
+  }
+}
+
+function buildAgentPrompt(key) {
+  return AGENT_PROMPT_TEMPLATE
+    .replaceAll("{{ENDPOINT}}", AGENT_CONFIG.functionUrl)
+    .replaceAll("{{IMPORT_URL}}", AGENT_CONFIG.importPageUrl)
+    .replaceAll("{{KEY}}", key)
+    .replaceAll("{{DAYS}}", String(AGENT_CONFIG.tokenDays));
+}
+
+async function copyAgentPrompt() {
+  const text = els.agentPromptOutput.value;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    els.copyPromptBtn.textContent = "¡Copiado!";
+    setTimeout(() => {
+      els.copyPromptBtn.textContent = "Copiar prompt";
+    }, 1500);
+  } catch (error) {
+    els.agentPromptOutput.select();
+  }
+}
+
+async function loadTokens() {
+  els.tokenList.textContent = "Cargando…";
+  try {
+    const snapshot = await getDocs(query(collection(db, "agentTokens"), orderBy("createdAt", "desc")));
+    if (snapshot.empty) {
+      els.tokenList.textContent = "Aún no hay claves generadas.";
+      return;
+    }
+
+    els.tokenList.innerHTML = "";
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      const expired = data.expiresAt?.toMillis ? data.expiresAt.toMillis() < Date.now() : false;
+      const stateLabel = data.revoked ? "Revocada" : expired ? "Vencida" : "Activa";
+
+      const row = document.createElement("div");
+      row.className = "token-row";
+      row.innerHTML = `
+        <div>
+          <strong>${escapeHtml(data.label || "Sin nombre")}</strong>
+          <small>${escapeHtml(data.tokenPreview || "")} · ${stateLabel} · usos: ${data.useCount || 0}</small>
+        </div>
+      `;
+
+      if (!data.revoked && !expired) {
+        const btn = document.createElement("button");
+        btn.className = "btn btn--tiny btn--danger";
+        btn.textContent = "Revocar";
+        btn.addEventListener("click", () => revokeToken(docSnap.id, data.label));
+        row.appendChild(btn);
+      }
+
+      els.tokenList.appendChild(row);
+    });
+  } catch (error) {
+    console.error("Error cargando claves:", error);
+    els.tokenList.textContent = "No se pudieron cargar las claves.";
+  }
+}
+
+async function revokeToken(id, label) {
+  if (!confirm(`¿Revocar la clave "${label || ""}"? La IA dejará de poder importar con ella.`)) return;
+  try {
+    await updateDoc(doc(db, "agentTokens", id), { revoked: true });
+    loadTokens();
+  } catch (error) {
+    console.error("Error revocando clave:", error);
+    alert("No se pudo revocar la clave.");
+  }
+}
+
+function generateRandomKey() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256hex(value) {
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function calculateScoreFromScores(scores) {
   const totalWeight = CRITERIA.reduce((sum, item) => sum + item.weight, 0);
   const weighted = CRITERIA.reduce((sum, item) => {
@@ -765,6 +984,19 @@ function formatCOP(value) {
     style: "currency",
     currency: "COP",
     maximumFractionDigits: 0
+  }).format(value || 0);
+}
+
+function formatCount(value, singular, plural) {
+  const number = safeNumber(value);
+  if (!number) return "—";
+  const formatted = formatNumber(number);
+  return `${formatted} ${number === 1 ? singular : plural}`;
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("es-CO", {
+    maximumFractionDigits: 1
   }).format(value || 0);
 }
 

@@ -30,7 +30,8 @@
           </div>
           <button id="loginBtn" class="btn btn--primary">Entrar con Google</button>
           <button id="logoutBtn" class="btn btn--ghost hidden">Salir</button>
-          <a class="btn btn--ghost" href="./agent-import.html">ImportaciÃ³n por agente</a>
+          <button id="agentModeBtn" class="btn btn--ghost hidden">Modo Agente / IA</button>
+          <a class="btn btn--ghost" href="./agent-import.html">Importación por agente</a>
         </div>
       </div>
     </header>
@@ -108,6 +109,43 @@
     </section>
   </div>
 
+  <dialog id="agentDialog" class="dialog">
+    <div class="dialog__content">
+      <div class="dialog__header">
+        <div>
+          <p class="eyebrow">Modo Agente</p>
+          <h2>Conectar una IA</h2>
+          <p class="muted">Genera una clave temporal (válida 7 días), copia el prompt completo y dáselo a la IA. No necesitas Firebase ni terminal.</p>
+        </div>
+        <button type="button" class="icon-btn" data-close-dialog="agentDialog">×</button>
+      </div>
+
+      <section class="agent-step">
+        <p class="eyebrow">Paso 1 · Crear clave</p>
+        <label class="field">
+          <span>Nombre para identificar la clave (opcional)</span>
+          <input id="agentTokenLabel" placeholder="Ej. Búsqueda junio, ChatGPT, Claude..." />
+        </label>
+        <button id="generateTokenBtn" class="btn btn--primary" type="button">Generar clave para IA</button>
+        <div id="newTokenBox" class="agent-import__preview hidden"></div>
+      </section>
+
+      <section class="agent-step">
+        <p class="eyebrow">Paso 2 · Copiar el prompt</p>
+        <p class="muted">Este prompt ya incluye el endpoint y la clave recién creada. Pégalo en la IA.</p>
+        <textarea id="agentPromptOutput" rows="14" spellcheck="false" readonly placeholder="Genera una clave arriba para construir el prompt."></textarea>
+        <div class="agent-import__tools">
+          <button id="copyPromptBtn" class="btn btn--primary btn--tiny" type="button">Copiar prompt</button>
+        </div>
+      </section>
+
+      <section class="agent-step">
+        <p class="eyebrow">Claves activas</p>
+        <div id="tokenList" class="token-list">Cargando…</div>
+      </section>
+    </div>
+  </dialog>
+
   <dialog id="optionDialog" class="dialog">
     <form id="optionForm" class="dialog__content">
       <div class="dialog__header">
@@ -169,6 +207,11 @@
         <label class="field">
           <span>Salones/espacios posibles</span>
           <input id="roomsInput" type="number" min="0" step="1" placeholder="Ej. 8" />
+        </label>
+
+        <label class="field">
+          <span>Baños</span>
+          <input id="bathroomsInput" type="number" min="0" step="0.5" placeholder="Ej. 4" />
         </label>
 
         <label class="field">
@@ -292,6 +335,10 @@
         <div>
           <span>Salones</span>
           <strong class="rooms-value"></strong>
+        </div>
+        <div>
+          <span>Baños</span>
+          <strong class="bathrooms-value"></strong>
         </div>
       </div>
 

@@ -7,7 +7,7 @@ App web ligera para registrar, comparar y calificar opciones de arrendamiento pa
 - Login con Google usando Firebase Authentication.
 - Base de datos en Cloud Firestore.
 - Acceso privado para Alek y Cata.
-- Registro de opciones de arriendo con ubicacion, zona, canon, administracion, area, contacto, link, estado, fecha de visita, pros, contras, riesgos, etiquetas y proxima accion.
+- Registro de opciones de arriendo con ubicacion, zona, canon, administracion, area, salones/espacios, cantidad de baños, contacto, link, estado, fecha de visita, pros, contras, riesgos, etiquetas y proxima accion.
 - Calificacion independiente de Alek y Cata.
 - Puntaje ponderado para comparar opciones.
 - Filtros por busqueda, estado, presupuesto maximo, puntaje minimo y orden.
@@ -55,9 +55,19 @@ El filtro visual de roles en el frontend ayuda a la experiencia, pero la segurid
 
 ## Modo Agente seguro
 
-El Modo Agente permite que ChatGPT Agent cargue opciones de arriendo encontradas en internet sin iniciar sesion con Google. El agente entra a `agent-import.html`, pega una clave temporal y pega un JSON con una o varias opciones. El frontend solo envia esos datos a la Cloud Function `agentImportRentalOptions`.
+El Modo Agente permite que una IA (ChatGPT Agent, Claude, etc.) cargue opciones de arriendo encontradas en internet sin iniciar sesion con Google. La IA entra a `agent-import.html`, pega una clave temporal y pega un JSON con una o varias opciones. El frontend solo envia esos datos a la Cloud Function `agentImportRentalOptions`.
 
-La clave no esta en `app.js`, `index.html`, `agent-import.html`, `agent-import.js`, `firebase.config.js` ni en ningun archivo publico. La validacion real ocurre en Firebase Cloud Functions v2 contra el secreto `AGENT_IMPORT_SECRET` guardado en Firebase Secret Manager. La funcion usa Firebase Admin SDK para crear o actualizar documentos en `rentalOptions`, por eso no se abre acceso publico en `firestore.rules`.
+### Generar la clave desde la app (sin terminal)
+
+Ya no necesitas Firebase CLI para crear claves en el dia a dia. Alek o Cata, despues de iniciar sesion con Google, presionan el boton **"Modo Agente / IA"** en el tablero:
+
+1. (Opcional) ponen un nombre a la clave (ej. "Busqueda junio").
+2. Presionan **"Generar clave para IA"**. La app crea una clave temporal valida 7 dias.
+3. La clave en claro se muestra **una sola vez** (estilo GitHub/Stripe). El prompt completo, con endpoint y clave ya incluidos, se copia automaticamente al portapapeles.
+4. Pegan ese prompt en la IA y listo.
+5. Pueden **revocar** cualquier clave activa desde la misma ventana.
+
+En Firestore, la clave nunca se guarda en claro: solo su hash SHA-256 (no reversible) en la coleccion `agentTokens`, junto con su caducidad, estado y contador de usos. La Cloud Function valida la clave recibida calculando su hash y comparandolo, y rechaza claves vencidas o revocadas. La funcion usa Firebase Admin SDK para crear o actualizar documentos en `rentalOptions`, por eso no se abre acceso publico en `firestore.rules`.
 
 La funcion:
 
@@ -77,28 +87,20 @@ La pagina `agent-import.html` acepta:
 - bloques markdown con etiqueta `json`;
 - texto con explicacion antes o despues del primer JSON valido.
 
-Tambien muestra vista previa con total detectado, lotes, datos incompletos, opciones sin parqueadero, sin precio, sin URL y posibles duplicados locales.
+Tambien muestra vista previa con total detectado, lotes, datos incompletos, opciones sin baños, opciones sin parqueadero, sin precio, sin URL y posibles duplicados locales.
 
-### Crear la clave segura
+### Despliegue inicial (una sola vez)
 
-Instala y autentica Firebase CLI si hace falta. Luego ejecuta:
-
-```bash
-firebase login
-firebase init functions
-firebase functions:secrets:set AGENT_IMPORT_SECRET
-firebase deploy --only functions
-```
-
-Al ejecutar:
+Ya no se usa el secreto `AGENT_IMPORT_SECRET`. Las claves se crean desde la app. Lo unico que se hace por terminal, y solo una vez, es desplegar la funcion y las reglas:
 
 ```bash
-firebase functions:secrets:set AGENT_IMPORT_SECRET
+cd functions
+npm install
+cd ..
+firebase deploy --only functions,firestore:rules --project arriendos-musicala
 ```
 
-Firebase pedira escribir la clave en consola. Esa clave NO debe subirse al repo. Esa clave sera la que podras darle a ChatGPT Agent cuando quieras que cargue opciones.
-
-Si usas emulador local y necesitas un archivo `.env.local` o `.secret.local`, puedes crearlo dentro de `functions/`, pero no se sube a GitHub. Ya existe `functions/.gitignore` para evitar subir `node_modules`, `.env`, `.secret.local` y archivos sensibles.
+Despues de esto, todas las claves se generan y revocan desde el boton "Modo Agente / IA" del tablero, sin volver a tocar la terminal.
 
 ### Desplegar Functions
 
@@ -201,6 +203,8 @@ curl -X POST "URL_DE_LA_FUNCTION" \
         "title": "Casa de prueba para Musicala",
         "zone": "Galerias",
         "rent": 5000000,
+        "rooms": 8,
+        "bathrooms": 4,
         "listingUrl": "https://ejemplo.com/arriendo-1",
         "pros": "Amplia y bien ubicada",
         "cons": "Uso de suelo por verificar",

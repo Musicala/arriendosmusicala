@@ -22,6 +22,13 @@ service cloud.firestore {
       allow read, create, update, delete: if isTeam();
     }
 
+    // Claves temporales para el Modo Agente.
+    // El equipo puede crear, listar y revocar. La clave en claro nunca se guarda
+    // aqui: solo su hash SHA-256, que no es reversible.
+    match /agentTokens/{tokenId} {
+      allow read, create, update, delete: if isTeam();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
