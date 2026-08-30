@@ -1,0 +1,15 @@
+{
+  "name": "arriendos-musicala",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Tablero de opciones de arriendo de Musicala e importador para agentes de IA.",
+  "scripts": {
+    "test": "npm run test:backend && npm run test:e2e",
+    "test:backend": "node --test functions/test/*.test.js",
+    "test:e2e": "node --test --test-timeout=90000 test/e2e.test.js",
+    "dev": "node test/dev-server.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.1"
+  }
+}

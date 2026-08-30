@@ -29,6 +29,19 @@ service cloud.firestore {
       allow read, create, update, delete: if isTeam();
     }
 
+    // Registro de idempotencia por lote. Solo la Cloud Function (Admin SDK)
+    // escribe aqui; el cliente puede leer para diagnosticar.
+    match /agentImportBatches/{batchId} {
+      allow read: if isTeam();
+      allow write: if false;
+    }
+
+    // Auditoria de importaciones. Solo lectura para el equipo.
+    match /agentImportLogs/{logId} {
+      allow read: if isTeam();
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

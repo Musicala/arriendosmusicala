@@ -1,225 +1,287 @@
-# Musicala Arriendos
+# Arriendos Musicala
 
-App web ligera para registrar, comparar y calificar opciones de arrendamiento para Musicala.
+Tablero privado para comparar opciones de arriendo de la sede de Musicala, con
+un flujo de **importación por agente** que permite que una persona —o una IA con
+navegador— investigue inmuebles, pegue un JSON y lo guarde de forma verificable.
 
-## Que hace
+---
 
-- Login con Google usando Firebase Authentication.
-- Base de datos en Cloud Firestore.
-- Acceso privado para Alek y Cata.
-- Registro de opciones de arriendo con ubicacion, zona, canon, administracion, area, salones/espacios, cantidad de baños, contacto, link, estado, fecha de visita, pros, contras, riesgos, etiquetas y proxima accion.
-- Calificacion independiente de Alek y Cata.
-- Puntaje ponderado para comparar opciones.
-- Filtros por busqueda, estado, presupuesto maximo, puntaje minimo y orden.
-- Vista tipo tablero con KPIs.
+## 1. Arquitectura
 
-## Archivos
-
-```txt
-musicala-arriendos-app/
-|-- index.html
-|-- agent-import.html
-|-- agent-import.js
-|-- styles.css
-|-- app.js
-|-- firebase.config.js
-|-- firestore.rules
-|-- functions/
-|   |-- index.js
-|   |-- package.json
-|   `-- .gitignore
-`-- README.md
+```
+Navegador (GitHub Pages)                 Google Cloud
+┌──────────────────────────┐            ┌─────────────────────────────────┐
+│ index.html   (tablero)   │  Firebase  │ Firestore                       │
+│ app.js                   │◄──SDK────► │  · rentalOptions                │
+│                          │            │  · agentTokens (solo hash)      │
+│ agent-import.html        │            │  · agentImportLogs (auditoría)  │
+│ agent-import.js          │            │  · agentImportBatches (idemp.)  │
+│   · valida en pantalla   │            └─────────────────────────────────┘
+│   · clave solo en memoria│                        ▲
+└──────────┬───────────────┘                        │ Admin SDK
+           │ POST /  ·  GET /health                 │
+           │ X-Agent-Key, X-Idempotency-Key         │
+           ▼                                        │
+   Cloud Function v2 `agentImportRentalOptions` ────┘
+     functions/index.js      → wiring con firebase-admin
+     functions/lib/cors.js   → CORS en TODAS las respuestas
+     functions/lib/auth.js   → clave temporal, expiración, rate limit
+     functions/lib/normalize.js → normalización sin inventar datos
+     functions/lib/schema.js → validación estricta por fila
+     functions/lib/handler.js → router /health + importación
 ```
 
-## Configuracion rapida
+El acceso al tablero está restringido por `firestore.rules` a dos cuentas de
+Google. El importador no usa esas credenciales: usa una **clave temporal** que
+el equipo genera desde el tablero (Modo Agente) y que caduca en 7 días.
 
-1. El proyecto ya apunta a Firebase `arriendos-musicala` desde `firebase.config.js`.
-2. En Firebase, activa Authentication > Sign-in method > Google.
-3. Activa Firestore Database.
-4. Revisa los correos permitidos en:
-   - `app.js`
-   - `firestore.rules`
-5. Sube `firestore.rules` desde la consola de Firebase o con Firebase CLI.
-6. Abre `index.html` con Live Server o subelo a GitHub Pages.
+---
 
-## Correos incluidos por defecto
+## 2. Endpoint correcto
 
-- Alek: `alekcaballeromusic@gmail.com`
-- Cata: `catalina.medina.leal@gmail.com`
+| Uso | URL |
+| --- | --- |
+| **Importar (producción)** | `https://us-central1-arriendos-musicala.cloudfunctions.net/agentImportRentalOptions` |
+| Diagnóstico | `.../agentImportRentalOptions/health` |
+| Alias Cloud Run (equivalente) | `https://agentimportrentaloptions-<hash>-uc.a.run.app` |
 
-Si Cata usa otro correo para Google, cambialo en `app.js` y `firestore.rules`.
+Se usa por defecto la URL de `cloudfunctions.net` porque es **estable entre
+despliegues**; la URL `run.app` incluye un hash que puede cambiar y fue una de
+las razones por las que la configuración anterior quedó apuntando a un destino
+inservible.
 
-## Nota importante
+### Contrato HTTP
 
-El filtro visual de roles en el frontend ayuda a la experiencia, pero la seguridad real esta en `firestore.rules`. No confies solo en el HTML para proteger datos privados.
+```
+GET  /health                     → estado, versión, fecha, origen permitido
+OPTIONS  /                       → preflight CORS (siempre 204)
+POST /                           → importar / validar
+     Content-Type: application/json
+     X-Agent-Key: <clave temporal>          (recomendado)
+     Authorization: Bearer <clave>          (compatibilidad)
+     X-Idempotency-Key: <id único por lote> (opcional pero recomendado)
+     Body: { "items": [...], "dryRun": true|false }
+```
 
-## Modo Agente seguro
+Respuesta:
 
-El Modo Agente permite que una IA (ChatGPT Agent, Claude, etc.) cargue opciones de arriendo encontradas en internet sin iniciar sesion con Google. La IA entra a `agent-import.html`, pega una clave temporal y pega un JSON con una o varias opciones. El frontend solo envia esos datos a la Cloud Function `agentImportRentalOptions`.
+```json
+{
+  "ok": true,
+  "requestId": "req_...",
+  "mode": "validated_not_saved" | "saved",
+  "totalReceived": 4,
+  "created": 4, "updated": 0, "skippedDuplicate": 0, "invalid": 0, "failed": 0,
+  "warnings": [], "errors": [{"index":1,"field":"listingUrl","cause":"...","suggestion":"..."}],
+  "results": [{"index":0,"outcome":"created","id":"..."}]
+}
+```
 
-### Generar la clave desde la app (sin terminal)
+Códigos: `200` ok · `207` guardado parcial · `400` lote inválido ·
+`401` clave ausente/desconocida · `403` vencida/revocada · `413` payload grande ·
+`415` Content-Type · `429` límite de uso · `500`/`503` error del backend.
+**Todas** las respuestas, incluidas las de error, llevan cabeceras CORS.
 
-Ya no necesitas Firebase CLI para crear claves en el dia a dia. Alek o Cata, despues de iniciar sesion con Google, presionan el boton **"Modo Agente / IA"** en el tablero:
+### Orígenes permitidos
 
-1. (Opcional) ponen un nombre a la clave (ej. "Busqueda junio").
-2. Presionan **"Generar clave para IA"**. La app crea una clave temporal valida 7 dias.
-3. La clave en claro se muestra **una sola vez** (estilo GitHub/Stripe). El prompt completo, con endpoint y clave ya incluidos, se copia automaticamente al portapapeles.
-4. Pegan ese prompt en la IA y listo.
-5. Pueden **revocar** cualquier clave activa desde la misma ventana.
+- `https://musicala.github.io`
+- `http://localhost:*` y `http://127.0.0.1:*` (cualquier puerto)
+- `https://*.github.io`, `https://arriendos-musicala*.web.app`, `*.firebaseapp.com`
 
-En Firestore, la clave nunca se guarda en claro: solo su hash SHA-256 (no reversible) en la coleccion `agentTokens`, junto con su caducidad, estado y contador de usos. La Cloud Function valida la clave recibida calculando su hash y comparandolo, y rechaza claves vencidas o revocadas. La funcion usa Firebase Admin SDK para crear o actualizar documentos en `rentalOptions`, por eso no se abre acceso publico en `firestore.rules`.
+---
 
-La funcion:
+## 3. Contrato del JSON de importación
 
-- acepta `Authorization: Bearer <clave>`, `X-Agent-Key: <clave>` o `agentKey` en el body;
-- limita cada request a 25 opciones, pero `agent-import.html` divide automaticamente JSON grandes en lotes;
-- normaliza numeros, estados, etiquetas y riesgos;
-- crea o actualiza opciones, pero no borra registros;
-- deduplica por `listingUrl` / `sourceUrl` o por `duplicateKey`;
-- registra auditoria en `agentImportLogs`;
-- nunca guarda la clave en Firestore, logs, consola ni respuestas JSON.
+Campos obligatorios: `title`, `zone`, `listingUrl`.
+Campos numéricos (0 si no se conocen): `rent`, `administration`,
+`servicesEstimate`, `setupEstimate`, `area`, `rooms`, `bathrooms`, `parking`.
+Se aceptan `"6.500.000"` o `"$ 6.500.000"` y se normalizan a `6500000`.
 
-La pagina `agent-import.html` acepta:
+- `status`: `nueva`, `por_contactar`, `agendada`, `visitada`, `favorita`, `descartada`.
+- `agentConfidence`: `alta`, `media`, `baja`.
+- `tags` y `risks`: array de strings (o string separada por comas).
+- `listingUrl` debe apuntar **al anuncio individual**. Una portada
+  (`https://portal.com`) o un buscador (`...?q=casa`) se rechaza con
+  explicación y sugerencia.
+- **Nunca se inventan datos**: lo que falta queda en `""` o `0`.
 
-- `{ "items": [...] }`
-- `{ "item": {...} }`
-- `[{...}, {...}]`
-- bloques markdown con etiqueta `json`;
-- texto con explicacion antes o despues del primer JSON valido.
+Ejemplo listo para usar: [`fixtures/ejemplo-4-inmuebles.json`](fixtures/ejemplo-4-inmuebles.json)
+(4 inmuebles, sin información sensible).
 
-Tambien muestra vista previa con total detectado, lotes, datos incompletos, opciones sin baños, opciones sin parqueadero, sin precio, sin URL y posibles duplicados locales.
+### Duplicados e idempotencia
 
-### Despliegue inicial (una sola vez)
+- La identidad de un anuncio es su `listingUrl` **normalizada** (sin `www.`,
+  sin `utm_*`, sin `#`, sin barra final, siempre `https`). Sin URL, se usa
+  `title|zone|rent`.
+- Reimportar el mismo JSON **actualiza**, no duplica.
+- Dos filas del mismo lote que apuntan al mismo anuncio → `skippedDuplicate`.
+- `X-Idempotency-Key` guarda el resultado del lote: un reintento por timeout
+  devuelve el resultado original (`idempotentReplay: true`) en vez de reescribir.
 
-Ya no se usa el secreto `AGENT_IMPORT_SECRET`. Las claves se crean desde la app. Lo unico que se hace por terminal, y solo una vez, es desplegar la funcion y las reglas:
+---
+
+## 4. Despliegue
+
+### Backend (obligatorio para que el importador funcione)
 
 ```bash
 cd functions
 npm install
 cd ..
-firebase deploy --only functions,firestore:rules --project arriendos-musicala
+firebase deploy --only functions,firestore:rules
 ```
 
-Despues de esto, todas las claves se generan y revocan desde el boton "Modo Agente / IA" del tablero, sin volver a tocar la terminal.
+> **Paso crítico.** La función debe aceptar invocaciones sin autenticación de
+> IAM. `functions/index.js` ya declara `invoker: "public"`, pero si el proyecto
+> tiene una política de organización que lo bloquea, hay que concederlo a mano:
+>
+> ```bash
+> gcloud run services add-iam-policy-binding agentimportrentaloptions \
+>   --region=us-central1 \
+>   --member=allUsers \
+>   --role=roles/run.invoker
+> ```
+>
+> Sin esto, Google responde **403 al preflight `OPTIONS` sin cabeceras CORS** y
+> el navegador solo puede reportar `Failed to fetch` sin status. Es exactamente
+> el fallo que motivó esta versión.
 
-### Desplegar Functions
-
-La funcion esta en `functions/index.js` y usa Node.js 20. Desde la raiz del proyecto:
+Verificación después de desplegar:
 
 ```bash
-cd functions
+# 1. ¿Responde y está sano?
+curl -s https://us-central1-arriendos-musicala.cloudfunctions.net/agentImportRentalOptions/health | jq
+
+# 2. ¿El preflight desde GitHub Pages devuelve CORS? Debe verse
+#    access-control-allow-origin: https://musicala.github.io
+curl -i -X OPTIONS \
+  https://us-central1-arriendos-musicala.cloudfunctions.net/agentImportRentalOptions \
+  -H "Origin: https://musicala.github.io" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: content-type,x-agent-key"
+```
+
+### Frontend
+
+El frontend es estático. GitHub Pages publica la rama configurada del
+repositorio en `https://musicala.github.io/arriendosmusicala/`. No hay build:
+`git push` a la rama publicada es el despliegue.
+
+---
+
+## 5. Claves temporales
+
+**Generar:** entra al tablero con una cuenta autorizada → *Modo Agente / IA* →
+*Generar clave para IA*. La clave en claro se muestra **una sola vez** y el
+prompt completo (con endpoint y clave) se copia al portapapeles.
+
+**Revocar:** en el mismo diálogo, botón *Revocar* junto a la clave.
+
+Garantías de seguridad:
+
+- En Firestore solo se guarda `sha256(clave)`, nunca la clave.
+- En el importador la clave vive **solo en una variable en memoria**: no se
+  escribe en `localStorage`, ni en la URL, ni en el JSON normalizado, ni en el
+  reporte de diagnóstico, ni en `console`. Se borra al recargar, al salir, con
+  el botón *Borrar clave ahora* y tras 15 minutos de inactividad.
+- Ningún mensaje de error muestra la clave, ni siquiera parcialmente.
+- El backend valida vencimiento, revocación y alcance, y aplica un límite de
+  40 peticiones cada 5 minutos por clave.
+- La auditoría (`agentImportLogs`) registra fecha, `requestId`, id y etiqueta de
+  la clave, conteos y duración — nunca la clave.
+
+---
+
+## 6. Cómo probar el flujo
+
+### Local, sin Firebase
+
+```bash
 npm install
-cd ..
-firebase deploy --only functions
+npm run dev
+# Frontend:  http://127.0.0.1:4173/agent-import.html
+# Endpoint:  http://127.0.0.1:4174
+# Clave demo: clave-demo-local-no-sensible
 ```
 
-Cuando Firebase entregue la URL final, pegala en el campo "URL de Cloud Function" de `agent-import.html`. Si vas a usar GitHub Pages, agrega tu origen en la constante `ALLOWED_ORIGINS` de `functions/index.js`, por ejemplo:
+Levanta el frontend real y la misma Cloud Function sobre un Firestore en
+memoria, en **puertos distintos**, de modo que el CORS se ejerce de verdad.
 
-```js
-"https://TU_USUARIO.github.io"
-```
-
-Despues vuelve a desplegar:
+### Pruebas automáticas
 
 ```bash
-firebase deploy --only functions
+npm test              # todo
+npm run test:backend  # 40 pruebas: unitarias + integración
+npm run test:e2e      # 4 pruebas en Chromium real
 ```
 
-Con `npx`, si no tienes Firebase CLI instalado globalmente:
+Cubren: normalización de números/URLs, esquema por fila, duplicados,
+autenticación (válida, vencida, revocada, ausente), CORS y `OPTIONS`, `/health`,
+validación sin guardar, guardado de 4 inmuebles, URL inválida, reintento e
+idempotencia, límite de uso, error del backend y no filtración de la clave.
+
+### Manual desde la página publicada
+
+1. Abre `https://musicala.github.io/arriendosmusicala/agent-import.html`.
+2. Paso 1 → *Probar conexión*. Debe decir **Conectado** y *Origen permitido: Sí*.
+3. Paso 2 → pega la clave temporal.
+4. Paso 3 → pega el JSON (o *Cargar ejemplo*).
+5. Paso 4 → revisa la tabla inmueble por inmueble.
+6. *Solo validar, no guardar* → aparece un panel **ámbar**: “Validado · NO guardado”.
+7. *Guardar en el tablero* → panel **verde**: “Guardado en el tablero”, con
+   creadas / actualizadas / duplicadas / inválidas / fallidas y los `requestId`.
+8. *Ver los registros en el tablero* para confirmarlos en `index.html`.
+
+---
+
+## 7. Diagnóstico de errores
+
+El importador **no** dice “Failed to fetch” y se calla. Distingue:
+
+| Situación | Qué muestra |
+| --- | --- |
+| Host inalcanzable | `DNS_OR_NETWORK` — “No se pudo alcanzar el host”, con `Host alcanzable: No` |
+| Servidor vivo pero navegador bloquea | `CORS_OR_IAM` — incluye el comando `gcloud ... add-iam-policy-binding` |
+| Sin respuesta a tiempo | `TIMEOUT` (45 s) |
+| 401 / 403 | Clave ausente, desconocida, vencida o revocada |
+| 404 / 405 | URL o método equivocados |
+| 429 | Límite de uso, con segundos de espera |
+| 5xx | Error del backend, con `requestId` para buscar en los logs |
+
+Para saber si es CORS o red, la página hace un sondeo `mode: "no-cors"` contra
+el host: si la conexión abre, el host existe y el problema es CORS/IAM.
+
+**Reporte de diagnóstico:** botón *Copiar reporte de diagnóstico* al final de la
+página. Incluye endpoint, hora, navegador, origen, estado HTTP, `requestId`,
+respuesta del servidor y el historial de intentos. **Nunca incluye la clave.**
+
+Logs del backend:
 
 ```bash
-npx firebase-tools deploy --only functions,firestore:rules --project arriendos-musicala
+firebase functions:log --only agentImportRentalOptions
 ```
 
-### Probar localmente
+Cada respuesta trae un `requestId` (también en la cabecera `X-Request-Id`) que
+aparece en los logs y en la colección `agentImportLogs`.
 
-Desde la raiz del proyecto:
+---
 
-```bash
-python -m http.server 4173 --bind 127.0.0.1
+## 8. Estructura del repositorio
+
 ```
-
-Luego abre:
-
-```txt
-http://127.0.0.1:4173/agent-import.html
+index.html / app.js          Tablero privado
+agent-import.html / .js      Importador por agente
+styles.css                   Estilos (paleta formal: azul pizarra + grafito)
+firebase.config.js           Configuración del cliente Firebase
+firestore.rules              Reglas de acceso
+functions/
+  index.js                   Cloud Function (wiring)
+  lib/                       cors · auth · normalize · schema · handler
+  test/                      40 pruebas (unitarias + integración)
+test/
+  dev-server.js              Servidor local: frontend + API en otro origen
+  e2e.test.js                Pruebas en Chromium real
+fixtures/
+  ejemplo-4-inmuebles.json   Ejemplo sin datos sensibles
+AGENT_PROMPT.md              Prompt base para la IA investigadora
 ```
-
-Prueba pegando un JSON con mas de 25 opciones. La vista previa debe mostrar 2 o mas lotes y el boton principal debe decir "Importar todo".
-
-Para validar sin guardar, activa la casilla "Solo validar, no guardar". Eso envia `dryRun: true` a la Cloud Function.
-
-### Desplegar en GitHub Pages
-
-Este proyecto ya esta pensado para publicarse como sitio estatico. Sube estos archivos al repo de GitHub Pages:
-
-- `index.html`
-- `agent-import.html`
-- `agent-import.js`
-- `styles.css`
-- `app.js`
-- `firebase.config.js`
-- `logo.png`
-
-La URL publica esperada es:
-
-```txt
-https://musicala.github.io/arriendosmusicala/
-```
-
-La Cloud Function ya permite CORS desde:
-
-```txt
-https://musicala.github.io
-```
-
-Si cambias de dominio, agrega el nuevo origen en `ALLOWED_ORIGINS` dentro de `functions/index.js` y vuelve a desplegar Functions.
-
-### Revisar logs de la Cloud Function
-
-Con Firebase CLI:
-
-```bash
-npx firebase-tools functions:log --only agentImportRentalOptions --project arriendos-musicala
-```
-
-En Google Cloud Console:
-
-1. Entra a `https://console.cloud.google.com/`.
-2. Selecciona el proyecto `arriendos-musicala`.
-3. Ve a Cloud Functions.
-4. Abre `agentImportRentalOptions`.
-5. Revisa la pestana Logs.
-
-### Probar con curl
-
-```bash
-curl -X POST "URL_DE_LA_FUNCTION" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer TU_CLAVE_TEMPORAL" \
-  -d '{
-    "items": [
-      {
-        "title": "Casa de prueba para Musicala",
-        "zone": "Galerias",
-        "rent": 5000000,
-        "rooms": 8,
-        "bathrooms": 4,
-        "listingUrl": "https://ejemplo.com/arriendo-1",
-        "pros": "Amplia y bien ubicada",
-        "cons": "Uso de suelo por verificar",
-        "tags": ["prueba", "agente"]
-      }
-    ]
-  }'
-```
-
-### Usarlo con ChatGPT Agent
-
-Puedes pedirle al agente algo como:
-
-```txt
-Entra a agent-import.html, usa esta clave temporal y carga estas opciones de arriendo que encuentres para Musicala.
-```
-
-El agente debe pegar la clave en el campo password, pegar el JSON en el textarea y presionar "Importar opciones". La clave se mantiene solo en memoria durante el envio: no se guarda en `localStorage`, `sessionStorage` ni cookies.

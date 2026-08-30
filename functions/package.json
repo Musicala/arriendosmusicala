@@ -1,6 +1,6 @@
 {
   "name": "arriendos-musicala-functions",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Cloud Functions for Arriendos Musicala.",
   "main": "index.js",
@@ -8,6 +8,7 @@
     "node": "20"
   },
   "scripts": {
+    "test": "node --test test/*.test.js",
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log"

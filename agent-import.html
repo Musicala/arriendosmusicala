@@ -3,22 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Importacion por agente | Arriendos Musicala</title>
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <title>Importación por agente | Arriendos Musicala</title>
+  <link rel="icon" href="./logo.png" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <div class="app-shell">
-    <header class="hero">
+    <header class="hero hero--compact">
       <div class="hero__content">
         <div class="brand">
           <div class="brand__mark">
             <img src="./logo.png" alt="Musicala" />
           </div>
           <div>
-            <p class="eyebrow">Musicala - Modo Agente</p>
-            <h1>Importacion por agente</h1>
+            <p class="eyebrow">Musicala · Modo Agente</p>
+            <h1>Importación de opciones de arriendo</h1>
             <p class="hero__text">
-              Pega una clave temporal y un JSON grande. La pagina divide en lotes, valida, importa y muestra errores utiles sin guardar la clave.
+              Pega el endpoint, la clave temporal y el JSON de la investigación.
+              Primero valida sin guardar, revisa la tabla inmueble por inmueble y luego guarda.
+              La clave vive solo en memoria durante esta sesión.
             </p>
           </div>
         </div>
@@ -30,67 +34,121 @@
     </header>
 
     <main class="agent-import">
-      <form id="agentImportForm" class="agent-import__panel">
+      <form id="agentImportForm" class="agent-import__panel" autocomplete="off">
+
+        <!-- Paso 1: conexión -->
         <section class="agent-step">
-          <p class="eyebrow">Paso 1</p>
+          <div class="agent-step__head">
+            <p class="eyebrow">Paso 1 · Conexión</p>
+            <span id="connectionBadge" class="badge badge--idle">Sin probar</span>
+          </div>
+
           <label class="field">
-            <span>Endpoint</span>
-            <input id="functionUrlInput" type="url" placeholder="https://us-central1-arriendos-musicala.cloudfunctions.net/agentImportRentalOptions" />
+            <span>Endpoint de importación</span>
+            <input id="functionUrlInput" type="url" spellcheck="false"
+                   placeholder="https://us-central1-arriendos-musicala.cloudfunctions.net/agentImportRentalOptions" />
           </label>
+
+          <div class="agent-import__tools">
+            <button id="testConnectionBtn" class="btn btn--ghost btn--tiny" type="button">Probar conexión</button>
+            <button id="resetEndpointBtn" class="btn btn--ghost btn--tiny" type="button">Restaurar endpoint por defecto</button>
+          </div>
+
+          <div id="connectionBox" class="diag-box">Todavía no se ha probado la conexión con el endpoint.</div>
         </section>
 
+        <!-- Paso 2: clave -->
         <section class="agent-step">
-          <p class="eyebrow">Paso 2</p>
+          <div class="agent-step__head">
+            <p class="eyebrow">Paso 2 · Clave temporal</p>
+            <span id="keyBadge" class="badge badge--idle">Sin clave</span>
+          </div>
+
           <label class="field">
             <span>Clave temporal del agente</span>
-            <input id="agentKeyInput" type="password" autocomplete="off" placeholder="Pegar clave temporal" />
+            <input id="agentKeyInput" type="password" autocomplete="off" spellcheck="false"
+                   name="clave-temporal-no-guardar" placeholder="Pegar clave temporal" />
           </label>
-        </section>
 
-        <section class="agent-step">
-          <p class="eyebrow">Paso 3</p>
-          <label class="field">
-            <span>Pegar JSON</span>
-            <textarea id="jsonInput" rows="18" spellcheck="false" placeholder='{"items":[{"title":"Casa amplia cerca a Galerias","zone":"Galerias","rent":6500000}]}'></textarea>
-          </label>
-        </section>
+          <p class="hint">
+            La clave no se guarda en el navegador, ni en el JSON, ni en los reportes de diagnóstico.
+            Se borra sola tras 15 minutos sin actividad, al recargar y al salir de la página.
+          </p>
 
-        <section class="agent-step">
-          <p class="eyebrow">Paso 4</p>
-          <div id="previewBox" class="agent-import__preview">Sin JSON para importar.</div>
           <div class="agent-import__tools">
-            <button id="copyNormalizedBtn" class="btn btn--ghost btn--tiny" type="button">Copiar JSON normalizado</button>
-            <button id="downloadNormalizedBtn" class="btn btn--ghost btn--tiny" type="button">Descargar JSON normalizado</button>
-            <button id="copyBatch1Btn" class="btn btn--ghost btn--tiny" type="button">Copiar lote 1</button>
-            <button id="copyBatch2Btn" class="btn btn--ghost btn--tiny" type="button">Copiar lote 2</button>
+            <button id="clearKeyBtn" class="btn btn--ghost btn--tiny" type="button">Borrar clave ahora</button>
           </div>
         </section>
 
+        <!-- Paso 3: JSON -->
         <section class="agent-step">
-          <p class="eyebrow">Paso 5</p>
+          <div class="agent-step__head">
+            <p class="eyebrow">Paso 3 · JSON de la investigación</p>
+            <span id="jsonBadge" class="badge badge--idle">Sin JSON</span>
+          </div>
+
+          <label class="field">
+            <span>Pegar JSON</span>
+            <textarea id="jsonInput" rows="14" spellcheck="false"
+                      placeholder='{"items":[{"title":"Casa en Pasadena","zone":"Pasadena","rent":6200000,"listingUrl":"https://www.metrocuadrado.com/inmueble/1001","status":"nueva","agentConfidence":"alta"}]}'></textarea>
+          </label>
+
+          <div class="agent-import__tools">
+            <button id="loadSampleBtn" class="btn btn--ghost btn--tiny" type="button">Cargar ejemplo</button>
+            <button id="copyNormalizedBtn" class="btn btn--ghost btn--tiny" type="button">Copiar JSON normalizado</button>
+            <button id="downloadNormalizedBtn" class="btn btn--ghost btn--tiny" type="button">Descargar JSON normalizado</button>
+          </div>
+        </section>
+
+        <!-- Paso 4: vista previa -->
+        <section class="agent-step">
+          <p class="eyebrow">Paso 4 · Vista previa</p>
+          <div id="previewBox" class="agent-import__preview">Sin JSON para importar.</div>
+          <div id="rowsBox" class="rows-box"></div>
+        </section>
+
+        <!-- Paso 5: enviar -->
+        <section class="agent-step">
+          <p class="eyebrow">Paso 5 · Enviar</p>
+
           <div class="agent-import__settings">
+            <label class="check-row">
+              <input id="skipDuplicatesInput" type="checkbox" checked />
+              <span>Omitir duplicados locales (misma URL de anuncio dentro del JSON)</span>
+            </label>
             <label class="check-row">
               <input id="stopOnErrorInput" type="checkbox" checked />
               <span>Detener si un lote falla</span>
             </label>
-            <label class="check-row">
-              <input id="skipDuplicatesInput" type="checkbox" checked />
-              <span>Omitir duplicados locales</span>
-            </label>
-            <label class="check-row">
-              <input id="dryRunInput" type="checkbox" />
-              <span>Solo validar, no guardar</span>
-            </label>
           </div>
 
           <div class="agent-import__actions">
-            <div id="progressBox" class="agent-import__progress">Listo para importar.</div>
-            <button id="importBtn" class="btn btn--primary" type="submit">Importar todo</button>
+            <div id="progressBox" class="agent-import__progress">Listo para validar.</div>
+            <div class="agent-import__buttons">
+              <button id="validateBtn" class="btn btn--ghost" type="button">Solo validar, no guardar</button>
+              <button id="importBtn" class="btn btn--primary" type="submit">Guardar en el tablero</button>
+            </div>
           </div>
         </section>
       </form>
 
       <section id="resultBox" class="agent-import__result hidden" aria-live="polite"></section>
+
+      <section class="agent-import__panel">
+        <div class="agent-step__head">
+          <p class="eyebrow">Diagnóstico</p>
+          <span class="badge badge--idle">Sin claves ni datos sensibles</span>
+        </div>
+        <p class="hint">
+          Genera un reporte con endpoint, hora, navegador, estado HTTP, requestId y respuesta del servidor.
+          Nunca incluye la clave temporal.
+        </p>
+        <div class="agent-import__tools">
+          <button id="copyDiagnosticBtn" class="btn btn--ghost btn--tiny" type="button">Copiar reporte de diagnóstico</button>
+          <button id="toggleDiagnosticBtn" class="btn btn--ghost btn--tiny" type="button">Ver reporte</button>
+        </div>
+        <pre id="diagnosticBox" class="diag-pre hidden"></pre>
+      </section>
     </main>
   </div>
 
